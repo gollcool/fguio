@@ -79,15 +79,14 @@ def handle_message(message):
     bot.send_chat_action(message.chat.id, "typing")
 
     buffer = ""
-    max_buffer = 700  # буфер 500–800 символов
-
+    min_buffer = 500  # минимальный буфер перед отправкой
     for sentence in ask_gemini_streaming(message.text):
         buffer += sentence + " "
-        # Отправляем, если буфер достиг максимума или предложение завершилось
-        if len(buffer) >= max_buffer or sentence.endswith(('.', '!', '?')):
+        # Отправляем только если буфер >= min_buffer или предложение явно завершилось
+        if len(buffer) >= min_buffer or sentence.endswith(('.', '!', '?')):
             bot.send_message(message.chat.id, buffer.strip())
             buffer = ""
-            time.sleep(0.05)  # минимальная пауза для Telegram
+            time.sleep(0.03)  # минимальная пауза, Telegram не блокирует
 
     if buffer:  # остаток текста
         bot.send_message(message.chat.id, buffer.strip())

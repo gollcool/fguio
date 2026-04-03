@@ -5,22 +5,21 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError
 from dotenv import load_dotenv
+import re
 
-# Загружаем переменные окружения
+# Подхватываем переменные окружения
 load_dotenv()
-
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-    raise Exception("Проверьте, что TELEGRAM_TOKEN и GEMINI_API_KEY установлены!")
+    raise Exception("Проверьте TELEGRAM_TOKEN и GEMINI_API_KEY!")
 
 # Твой системный кодекс
 CODEX = "Твой кодекс здесь..."
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 client = genai.Client(api_key=GEMINI_API_KEY)
-
 MODEL_NAME = "gemini-3-flash-preview"
 
 def ask_gemini_streaming(user_text, retries=3):
@@ -38,7 +37,6 @@ def ask_gemini_streaming(user_text, retries=3):
 
     for attempt in range(retries):
         try:
-            # потоковая генерация
             partial_response = ""
             for chunk in client.models.generate_content_stream(
                 model=MODEL_NAME,
@@ -47,7 +45,13 @@ def ask_gemini_streaming(user_text, retries=3):
             ):
                 if chunk.text:
                     partial_response += chunk.text
-                    yield chunk.text  # отправка части текста сразу
+                    # Разбиваем на предложения
+                    sentences = re.split(r'(?<=[.!?])\s+', partial_response)
+                    for sentence in sentences[:-1]:
+                        yield sentence
+                    partial_response = sentences[-1]
+            if partial_response:
+                yield partial_response
             return
         except APIError as e:
             err = str(e)
@@ -74,14 +78,20 @@ def ask_gemini_streaming(user_text, retries=3):
 def handle_message(message):
     bot.send_chat_action(message.chat.id, "typing")
 
-    # Отправка текста по мере генерации
-    full_text = ""
-    for chunk_text in ask_gemini_streaming(message.text):
-        # Telegram ограничивает частые сообщения, поэтому делаем небольшую паузу
-        if chunk_text:
-            bot.send_message(message.chat.id, chunk_text)
-            time.sleep(0.05)
-        full_text += chunk_text
+    buffer = ""
+    max_buffer = 700  # буфер 500–800 символов
+
+    for sentence in ask_gemini_streaming(message.text):
+        buffer += sentence + " "
+        # Отправляем, если буфер достиг максимума или предложение завершилось
+        if len(buffer) >= max_buffer or sentence.endswith(('.', '!', '?')):
+            bot.send_message(message.chat.id, buffer.strip())
+            buffer = ""
+            time.sleep(0.05)  # минимальная пауза для Telegram
+
+    if buffer:  # остаток текста
+        bot.send_message(message.chat.id, buffer.strip())
+
 
 print("Бот запущен...")
 while True:

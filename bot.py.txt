@@ -1,0 +1,69 @@
+import telebot
+import time
+import os
+from google import genai
+from google.genai import types
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+bot = telebot.TeleBot(TELEGRAM_TOKEN)
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+MODEL_NAME = "gemini-3-flash-preview"
+CODEX = "Твой кодекс здесь..."
+
+def ask_gemini(user_text):
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=user_text)],
+        ),
+    ]
+
+    config = types.GenerateContentConfig(
+        system_instruction=CODEX,
+        thinking_config=types.ThinkingConfig(
+            thinking_level="MEDIUM",
+        ),
+    )
+
+    try:
+        time.sleep(2)
+
+        response_text = ""
+
+        for chunk in client.models.generate_content_stream(
+            model=MODEL_NAME,
+            contents=contents,
+            config=config,
+        ):
+            if chunk.text:
+                response_text += chunk.text
+
+        return response_text
+
+    except Exception as e:
+        error_text = str(e)
+
+        if "429" in error_text:
+            return "⚠ Превышен лимит, подожди немного."
+
+        if "400" in error_text:
+            return "⚠ Слишком длинное сообщение."
+
+        return f"❌ Ошибка:\n{error_text}"
+
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    bot.send_chat_action(message.chat.id, "typing")
+
+    answer = ask_gemini(message.text)
+
+    for i in range(0, len(answer), 4000):
+        bot.send_message(message.chat.id, answer[i:i+4000])
+        time.sleep(0.3)
+
+print("Бот запущен...")
+bot.polling(none_stop=True)
